@@ -59,9 +59,66 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
       - name: Test (with Postgres integration tests)
-        run: go test ./...
+        run: |
+          set -o pipefail
+          go test ./... -coverprofile=coverage.out | tee coverage-packages.txt
         env:
           TEST_DATABASE_URL: postgres://sorobeacon:sorobeacon@localhost:5432/sorobeacon?sslmode=disable
+      # Coverage is reported from this job only: it is the one with Postgres,
+      # so internal/store is measured against the real backend. The no-database
+      # job would understate it badly. A job summary needs no token or external
+      # service, so it also works on pull requests from forks.
+      #
+      # Scope: the root module only. The nested Terraform provider module is a
+      # separate Go module and is not included in these figures. No threshold
+      # gate yet: with internal/grpc near 12% and internal/api/graphql untested,
+      # any gate would either block everything or be set too low to mean
+      # anything.
+      - name: Coverage report
+        run: |
+          {
+            echo "## Test coverage (root module, with Postgres)"
+            echo
+            echo "Total: $(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')"
+            echo
+            echo "Excludes the nested Terraform provider module. Per-package figures:"
+            echo
+            grep -E 'coverage:|no test files' coverage-packages.txt | sed 's/^/    /'
+            echo
+            echo "<details><summary>Per-function coverage</summary>"
+            echo
+            echo '```'
+            go tool cover -func=coverage.out
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TEST_DATABASE_URL: postgres://sorobeacon:sorobeacon@localhost:5432/sorobeacon?sslmode=disable
+
+  # Builds the image without pushing it, so a broken Dockerfile fails the pull
+  # request instead of whoever deploys next. It pushes nothing and uses no
+  # secrets, which keeps it safe on pull requests from forks.
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4.4.1
+      # Same build arguments as the Makefile, so the ldflags stamping is
+      # exercised rather than silently falling back to the Dockerfile defaults.
+      - uses: docker/build-push-action@v7.4.0
+        with:
+          context: .
+          push: false
+          load: true
+          platforms: linux/amd64
+          tags: sorobeacon:ci
+          build-args: |
+            VERSION=ci-${{ github.sha }}
+            COMMIT=${{ github.sha }}
+            DATE=${{ github.event.head_commit.timestamp || github.event.pull_request.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   lint:
     runs-on: ubuntu-latest

@@ -39,6 +39,8 @@ const (
 	breakerStateName      = "sorobeacon_channel_breaker_state"
 	httpDurationName      = "sorobeacon_http_request_duration_seconds"
 	streamDroppedName     = "sorobeacon_alerts_stream_dropped_total"
+	deadLettersName       = "sorobeacon_dead_letters_total"
+	pollPanicsName        = "sorobeacon_poll_panics_total"
 )
 
 func TestRecordPollTracksOutcomesAndDuration(t *testing.T) {
@@ -348,4 +350,87 @@ func hasLabels(sample *dto.Metric, want map[string]string) bool {
 		}
 	}
 	return true
+}
+
+// RecordDeadLetter, ClearDeadLetter and SetDeadLetters all drive one gauge, so
+// they are asserted together: SetDeadLetters is authoritative (it overwrites
+// whatever the increments accumulated), and a record followed by a clear must
+// return the gauge to where it started or the alert never resolves.
+func TestDeadLetterGaugeRecordClearAndSetAgree(t *testing.T) {
+	m := New()
+	assert.Equal(t, float64(0), m.sampleValue(t, deadLettersName, nil))
+
+	m.RecordDeadLetter()
+	m.RecordDeadLetter()
+	assert.Equal(t, float64(2), m.sampleValue(t, deadLettersName, nil))
+
+	m.ClearDeadLetter()
+	assert.Equal(t, float64(1), m.sampleValue(t, deadLettersName, nil))
+
+	m.SetDeadLetters(7)
+	assert.Equal(t, float64(7), m.sampleValue(t, deadLettersName, nil), "Set overwrites the incremented value")
+
+	m.RecordDeadLetter()
+	m.ClearDeadLetter()
+	assert.Equal(t, float64(7), m.sampleValue(t, deadLettersName, nil), "record then clear returns to the starting value")
+
+	m.SetDeadLetters(0)
+	assert.Equal(t, float64(0), m.sampleValue(t, deadLettersName, nil))
+}
+
+// The dead-letter gauge is exported without labels; a label added later would
+// silently break the alert rule that watches it.
+func TestDeadLetterGaugeHasNoLabels(t *testing.T) {
+	m := New()
+	m.RecordDeadLetter()
+
+	families, err := m.registry.Gather()
+	require.NoError(t, err)
+	for _, family := range families {
+		if family.GetName() != deadLettersName {
+			continue
+		}
+		require.Len(t, family.GetMetric(), 1)
+		assert.Empty(t, family.GetMetric()[0].GetLabel())
+		return
+	}
+	t.Fatalf("%s was not exported", deadLettersName)
+}
+
+func TestRecordPanicCountsPerNetwork(t *testing.T) {
+	m := New()
+	m.WithNetwork("testnet").RecordPanic()
+	m.WithNetwork("testnet").RecordPanic()
+	m.WithNetwork("mainnet").RecordPanic()
+
+	assert.Equal(t, float64(2), m.sampleValue(t, pollPanicsName, map[string]string{"network": "testnet"}))
+	assert.Equal(t, float64(1), m.sampleValue(t, pollPanicsName, map[string]string{"network": "mainnet"}))
+}
+
+// Two networks must produce separate series that share one registry, rather
+// than the later view overwriting the earlier one.
+func TestWithNetworkKeepsNetworksSeparate(t *testing.T) {
+	m := New()
+	testnet := m.WithNetwork("testnet")
+	mainnet := m.WithNetwork("mainnet")
+
+	testnet.SetPollLag(3)
+	mainnet.SetPollLag(90)
+
+	assert.Equal(t, float64(3), m.sampleValue(t, pollLagName, map[string]string{"network": "testnet"}))
+	assert.Equal(t, float64(90), m.sampleValue(t, pollLagName, map[string]string{"network": "mainnet"}))
+	assert.Equal(t, "testnet", testnet.network)
+	assert.Equal(t, "", m.network, "the parent is not mutated by deriving a view")
+}
+
+func TestDeadLetterPanicAndNetworkAreNilSafe(t *testing.T) {
+	var m *Metrics
+
+	assert.NotPanics(t, func() {
+		assert.Nil(t, m.WithNetwork("testnet"))
+		m.RecordPanic()
+		m.SetDeadLetters(3)
+		m.RecordDeadLetter()
+		m.ClearDeadLetter()
+	})
 }
