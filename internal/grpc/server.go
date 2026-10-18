@@ -19,6 +19,7 @@ package grpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -27,6 +28,7 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -42,10 +44,19 @@ type Server struct {
 	srv   *grpc.Server
 }
 
+type jsonCodec struct{}
+
+func (jsonCodec) Marshal(v any) ([]byte, error)      { return json.Marshal(v) }
+func (jsonCodec) Unmarshal(data []byte, v any) error { return json.Unmarshal(data, v) }
+func (jsonCodec) Name() string                       { return "json" }
+
+func init() { encoding.RegisterCodec(jsonCodec{}) }
+
 // New builds a gRPC server. The server is not started until Serve is called.
 func New(st store.Store, authn *auth.Authenticator, log *slog.Logger) *Server {
 	s := &Server{store: st, auth: authn, log: log}
 	opts := []grpc.ServerOption{
+		grpc.ForceServerCodec(jsonCodec{}),
 		grpc.UnaryInterceptor(s.authUnary),
 		grpc.StreamInterceptor(s.authStream),
 	}
@@ -207,26 +218,50 @@ type StreamAlertsRequest struct {
 
 // --- handler wrappers ---
 
-func getMonitorHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func getMonitorHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := &GetMonitorRequest{}
 	if err := dec(req); err != nil {
 		return nil, err
 	}
+	if interceptor != nil {
+		return interceptor(ctx, req, &grpc.UnaryServerInfo{
+			Server:     srv,
+			FullMethod: "/" + monitorServiceDesc.ServiceName + "/GetMonitor",
+		}, func(ctx context.Context, req any) (any, error) {
+			return srv.(MonitorServiceServer).GetMonitor(ctx, req.(*GetMonitorRequest))
+		})
+	}
 	return srv.(MonitorServiceServer).GetMonitor(ctx, req)
 }
 
-func listMonitorsHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func listMonitorsHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := &ListMonitorsRequest{}
 	if err := dec(req); err != nil {
 		return nil, err
 	}
+	if interceptor != nil {
+		return interceptor(ctx, req, &grpc.UnaryServerInfo{
+			Server:     srv,
+			FullMethod: "/" + monitorServiceDesc.ServiceName + "/ListMonitors",
+		}, func(ctx context.Context, req any) (any, error) {
+			return srv.(MonitorServiceServer).ListMonitors(ctx, req.(*ListMonitorsRequest))
+		})
+	}
 	return srv.(MonitorServiceServer).ListMonitors(ctx, req)
 }
 
-func listAlertsHandler(srv any, ctx context.Context, dec func(any) error, _ grpc.UnaryServerInterceptor) (any, error) {
+func listAlertsHandler(srv any, ctx context.Context, dec func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	req := &ListAlertsRequest{}
 	if err := dec(req); err != nil {
 		return nil, err
+	}
+	if interceptor != nil {
+		return interceptor(ctx, req, &grpc.UnaryServerInfo{
+			Server:     srv,
+			FullMethod: "/" + monitorServiceDesc.ServiceName + "/ListAlerts",
+		}, func(ctx context.Context, req any) (any, error) {
+			return srv.(MonitorServiceServer).ListAlerts(ctx, req.(*ListAlertsRequest))
+		})
 	}
 	return srv.(MonitorServiceServer).ListAlerts(ctx, req)
 }

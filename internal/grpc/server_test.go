@@ -71,6 +71,7 @@ func startServer(t *testing.T, st store.Store, authn *auth.Authenticator) *grpc.
 		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
 			return lis.DialContext(ctx)
 		}),
+		grpc.WithDefaultCallOptions(grpc.CallContentSubtype("json")),
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 	)
 	require.NoError(t, err)
