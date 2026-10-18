@@ -226,7 +226,7 @@ func getMonitorHandler(srv any, ctx context.Context, dec func(any) error, interc
 	if interceptor != nil {
 		return interceptor(ctx, req, &grpc.UnaryServerInfo{
 			Server:     srv,
-			FullMethod: "/" + monitorServiceDesc.ServiceName + "/GetMonitor",
+			FullMethod: "/sorobeacon.v1.MonitorService/GetMonitor",
 		}, func(ctx context.Context, req any) (any, error) {
 			return srv.(MonitorServiceServer).GetMonitor(ctx, req.(*GetMonitorRequest))
 		})
@@ -242,7 +242,7 @@ func listMonitorsHandler(srv any, ctx context.Context, dec func(any) error, inte
 	if interceptor != nil {
 		return interceptor(ctx, req, &grpc.UnaryServerInfo{
 			Server:     srv,
-			FullMethod: "/" + monitorServiceDesc.ServiceName + "/ListMonitors",
+			FullMethod: "/sorobeacon.v1.MonitorService/ListMonitors",
 		}, func(ctx context.Context, req any) (any, error) {
 			return srv.(MonitorServiceServer).ListMonitors(ctx, req.(*ListMonitorsRequest))
 		})
@@ -258,7 +258,7 @@ func listAlertsHandler(srv any, ctx context.Context, dec func(any) error, interc
 	if interceptor != nil {
 		return interceptor(ctx, req, &grpc.UnaryServerInfo{
 			Server:     srv,
-			FullMethod: "/" + monitorServiceDesc.ServiceName + "/ListAlerts",
+			FullMethod: "/sorobeacon.v1.MonitorService/ListAlerts",
 		}, func(ctx context.Context, req any) (any, error) {
 			return srv.(MonitorServiceServer).ListAlerts(ctx, req.(*ListAlertsRequest))
 		})
